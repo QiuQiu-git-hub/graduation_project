@@ -1,7 +1,7 @@
-streamlit
-sqlalchemy
+streamlit==1.32.2
+sqlalchemy==2.0.29
 pandas
 python-dotenv
-openai
-langchain
-langchain-openai
+openai==1.14.1
+langchain==0.1.17
+langchain-openai==0.1.4

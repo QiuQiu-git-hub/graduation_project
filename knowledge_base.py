@@ -1,15 +1,10 @@
-# knowledge_base.py
 import os
 import json
 from dotenv import load_dotenv  # type: ignore
 from langchain_openai import ChatOpenAI  # type: ignore
 from langchain_core.tools import Tool  # type: ignore
-from langchain.agents import AgentExecutor  # type: ignore
-from langchain.agents.openai_functions_agent.base import create_openai_functions_agent  # type: ignore
-from langchain.agents.format_scratchpad import format_to_openai_functions  # type: ignore
-from langchain.agents.output_parsers import OpenAIFunctionsAgentOutputParser  # type: ignore
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder  # type: ignore
-from langchain_core.messages import BaseMessage  # type: ignore
+from langchain.agents import AgentExecutor, create_openai_functions_agent  # type: ignore
+from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder  # type: ignore
 
 # -------------------------- 1. 基础配置 --------------------------
 load_dotenv()
@@ -384,11 +379,10 @@ agent = create_openai_functions_agent(
     prompt=prompt
 )
 
+# 修正 AgentExecutor 初始化参数（新版无需自定义 agent_scratchpad）
 agent_executor = AgentExecutor(
     agent=agent,
     tools=tools,
     verbose=True,
-    handle_parsing_errors=True,
-    agent_scratchpad=lambda x: format_to_openai_functions(x["intermediate_steps"]),
-    output_parser=OpenAIFunctionsAgentOutputParser()
+    handle_parsing_errors=True
 )

@@ -1,0 +1,2 @@
+*.json filter=lfs diff=lfs merge=lfs -text
+all_poems_perfect.json filter=lfs diff=lfs merge=lfs -text

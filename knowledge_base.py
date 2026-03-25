@@ -330,17 +330,17 @@ tools = [
     ),
     Tool(
         name="ChatWithPoet",
-        func=lambda id, input, style="常规讲解": chat_with_poet(id, input, style),
+        func=lambda args: chat_with_poet(args[0], args[1], args[2] if len(args) > 2 else "常规讲解"),
         description="以诗词作者的角色与用户对话、解释诗句、点评用户理解，输入参数：诗词 ID、用户输入、学习风格（可选）"
     ),
     Tool(
         name="EvaluatePoemAnswer",
-        func=lambda id, input: json.dumps(evaluate_poem_answer(id, input), ensure_ascii=False),
+        func=lambda args: json.dumps(evaluate_poem_answer(args[0], args[1]), ensure_ascii=False),
         description="对用户关于诗词的回答进行多维度评分，返回 JSON 格式的详细评价，输入参数：诗词 ID、用户回答"
     ),
     Tool(
         name="GenerateQuiz",
-        func=lambda id, diff="中等": json.dumps(generate_quiz(id, diff), ensure_ascii=False),
+        func=lambda args: json.dumps(generate_quiz(args[0], args[1] if len(args) > 1 else "中等"), ensure_ascii=False),
         description="生成诗词测试题（选择、填空、简答），输入参数：诗词 ID、难度（简单/中等/困难）"
     ),
     Tool(

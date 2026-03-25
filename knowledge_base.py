@@ -3,7 +3,7 @@ import os
 import json
 from dotenv import load_dotenv  # type: ignore
 from langchain_openai import ChatOpenAI  # type: ignore
-from langchain.tools import Tool  # type: ignore
+from langchain_core.tools import Tool  # type: ignore
 from langchain.agents import AgentExecutor  # type: ignore
 from langchain.agents.openai_functions_agent.base import create_openai_functions_agent  # type: ignore
 from langchain.agents.format_scratchpad import format_to_openai_functions  # type: ignore

@@ -2,13 +2,14 @@
 import streamlit as st  # type: ignore
 import pandas as pd  # type: ignore
 from database import init_db, register_user, login_user, get_user_info, update_user_profile, save_record, get_user_history
-from knowledge_base import POETRY_DB, agent_executor, evaluate_poem_answer
+from knowledge_base import POETRY_DB, agent_executor, evaluate_poem_answer, search_poems_by_content, get_poem_by_id, get_all_authors, get_poem_selection_options
+
 st.set_page_config(page_title="AI 古诗词情景教学平台", layout="wide")
 init_db()
 
 # 2. 会话状态管理
 def init_session_state():
-    """初始化会话状态，支持页面刷新后保持登录"""
+    """初始化会话状态"""
     if "logged_in" not in st.session_state:
         query_params = st.query_params
         saved_username = query_params.get("username")
@@ -29,6 +30,10 @@ def init_session_state():
         st.session_state.last_score_detail = None
     if "show_all_history" not in st.session_state:
         st.session_state.show_all_history = False
+    if "search_keyword" not in st.session_state:
+        st.session_state.search_keyword = ""
+    if "selected_author" not in st.session_state:
+        st.session_state.selected_author = "全部"
 
 init_session_state()
 
@@ -129,20 +134,16 @@ else:
             st.query_params["logged_in"] = ""
             st.rerun()
         
-        # 📚 学习历史（美化版）
+        # 📚 学习历史
         st.divider()
         st.markdown("### 📚 学习历史")
         
         history = get_user_history(st.session_state.username)
         if history:
-            # 按时间倒序排列
             history = sorted(history, key=lambda x: x.timestamp, reverse=True)
-            
-            # 侧边栏只显示 3 条
             preview_history = history[:3]
             
             for h in preview_history:
-                # 根据得分确定颜色和显示
                 if h.score is None:
                     color = "#6c757d"
                     emoji = "📝"
@@ -164,7 +165,6 @@ else:
                     emoji = "💪"
                     score_text = f"{h.score}分"
                 
-                # 卡片式展示
                 st.markdown(f"""
                 <div style="
                     background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
@@ -199,7 +199,6 @@ else:
                 </div>
                 """, unsafe_allow_html=True)
             
-            # 更多记录按钮
             if len(history) > 3:
                 if st.button(
                     f"📋 更多记录（共{len(history)}条）",
@@ -209,7 +208,6 @@ else:
                     st.session_state.show_all_history = True
                     st.rerun()
             
-            # 统计信息
             scored_records = [h for h in history if h.score is not None]
             if scored_records:
                 avg_score = sum(h.score for h in scored_records) / len(scored_records)
@@ -237,18 +235,16 @@ else:
             ">
                 <div style="font-size: 32px; margin-bottom: 8px;">📭</div>
                 <div>暂无学习记录～</div>
-                <div style="font-size: 12px; margin-top: 4px;">开始学习后这里会显示你的成长轨迹</div>
             </div>
             """, unsafe_allow_html=True)
 
-    # 📋 全部记录弹窗（在主界面顶部显示）
+    # 📋 全部记录弹窗
     if st.session_state.get("show_all_history", False):
         history = get_user_history(st.session_state.username)
         history = sorted(history, key=lambda x: x.timestamp, reverse=True)
         
         st.markdown("### 📚 全部学习记录")
         
-        # 关闭按钮
         col1, col2 = st.columns([5, 1])
         with col2:
             if st.button("❌ 关闭", key="close_history_modal", use_container_width=True):
@@ -258,7 +254,6 @@ else:
         st.divider()
         
         if history:
-            # 每行显示 2 条记录
             for i, h in enumerate(history):
                 if h.score is None:
                     color = "#6c757d"
@@ -334,129 +329,169 @@ else:
     # 主界面
     st.title("🏯 AIGC 古诗词情景教学平台")
     
+    # 📌 内容搜索框 + 作者筛选（✅ 核心功能）
+    st.markdown("### 🔍 诗词检索")
+    
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        search_keyword = st.text_input(
+            "📝 输入诗句或关键词", 
+            placeholder="例如：明月几时有、大江东去、春眠不觉晓...",
+            key="search_keyword_input",
+            value=st.session_state.search_keyword
+        )
+    with col2:
+        all_authors = ["全部"] + get_all_authors()
+        selected_author = st.selectbox(
+            "📚 作者筛选", 
+            all_authors, 
+            key="select_author",
+            index=all_authors.index(st.session_state.selected_author) if st.session_state.selected_author in all_authors else 0
+        )
+    
+    # 更新会话状态
+    if search_keyword != st.session_state.search_keyword:
+        st.session_state.search_keyword = search_keyword
+    if selected_author != st.session_state.selected_author:
+        st.session_state.selected_author = selected_author
+    
+    # 根据搜索和作者过滤诗词
+    poem_options = search_poems_by_content(search_keyword, selected_author)
+    
+    # 显示搜索结果统计
+    if search_keyword:
+        st.caption(f"📊 找到 {len(poem_options)} 首匹配的诗词")
+    
     # 选择古诗
-    selected_poem = st.selectbox("请选择要学习的古诗", list(POETRY_DB.keys()))
-    poem_data = POETRY_DB[selected_poem]
-    
-    # 展示原诗与背景
-    with st.expander("📖 原诗与创作背景", expanded=True):
-        col1, col2 = st.columns([1, 2])
-        with col1:
-            st.markdown(f"**《{selected_poem}**")
-            st.markdown(f"*{poem_data['author']}* ({poem_data.get('dynasty', '古代')})")
-            st.text(poem_data['content'].replace("。", "。\n").replace("，", "，\n"))
-        with col2:
-            st.info(f"**创作背景**：{poem_data['context']}\n\n**情景设定**：{poem_data['role_setting']}")
-            st.markdown(f"**核心意象**：{', '.join(poem_data.get('keywords', []))}")
-            st.markdown(f"**学习难度**：{poem_data.get('difficulty', '中等')}")
-    
-    st.divider()
-    
-    # 核心聊天交互
-    st.subheader(f"🗣️ 与 {poem_data['author']} 隔空对话")
-    st.caption(f"提示：当前学习目的【{st.session_state.user_profile.get('learning_purpose', '兴趣学习')}】，智能体将据此调整回复风格")
-    
-    # 用户水平选择
-    user_level = st.selectbox(
-        "当前学习水平",
-        ["初级", "中级", "高级"],
-        key="user_level"
-    )
-    
-    # 聊天记录显示
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-    
-    # 评分详情展示
-    if st.session_state.last_score_detail:
-        with st.expander("📊 评分详情", expanded=True):
-            detail = st.session_state.last_score_detail
-            col1, col2 = st.columns([1, 3])
-            with col1:
-                st.metric("总分", f"{detail['total_score']}分")
-            with col2:
-                st.markdown(f"**💡 评价**：{detail['feedback']}")
-            
-            cols = st.columns(5)
-            for i, (dim, score) in enumerate(detail['dimensions'].items()):
-                cols[i].metric(dim, f"{score}分")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("### ✅ 优点")
-                for s in detail.get('strengths', []):
-                    st.write(f"- {s}")
-            with col2:
-                st.markdown("### 🔧 改进建议")
-                for s in detail.get('suggestions', []):
-                    st.write(f"- {s}")
-    
-    if st.session_state.messages:
-        if st.button("🗑️ 清空聊天记录", type="secondary"):
-            st.session_state.messages = []
-            st.session_state.last_score_detail = None
-            st.rerun()
-    
-    SCORE_KEYWORDS = ["打分", "评分", "评价", "判分", "评点", "给分", "估分"]
-    
-    if user_input := st.chat_input("请输入你的问题/感悟...（要求打分请含打分/评分等关键词）"):
-        st.session_state.messages.append({"role": "user", "content": user_input})
-        with st.chat_message("user"):
-            st.markdown(user_input)
+    if poem_options:
+        selected_display = st.selectbox(
+            "请选择要学习的古诗词", 
+            list(poem_options.keys()), 
+            key="select_poem"
+        )
+        selected_poem_id = poem_options[selected_display]
+        poem_data = get_poem_by_id(selected_poem_id)
         
-        need_score = any(keyword in user_input for keyword in SCORE_KEYWORDS)
+        # 展示原诗与背景
+        with st.expander("📖 原诗展示", expanded=True):
+            col1, col2 = st.columns([1, 2])
+            with col1:
+                st.markdown(f"**《{poem_data['title']}**")
+                st.markdown(f"*{poem_data['author']}*")
+                st.text(poem_data['content'].replace("。", "。\n").replace("，", "，\n"))
+            with col2:
+                st.markdown(f"**作者**：{poem_data['author']}")
+                st.markdown(f"**字数**：{len(poem_data['content'])}字")
         
-        with st.spinner(f"{poem_data['author']} 正在构思回复..."):
-            base_instruction = f"""
-请以{poem_data['author']}的角色，结合《{selected_poem}》的创作背景回复用户。
+        st.divider()
+        
+        # 核心聊天交互
+        st.subheader(f"🗣️ 与 {poem_data['author']} 隔空对话")
+        st.caption(f"提示：当前学习目的【{st.session_state.user_profile.get('learning_purpose', '兴趣学习')}】，智能体将据此调整回复风格")
+        
+        user_level = st.selectbox(
+            "当前学习水平",
+            ["初级", "中级", "高级"],
+            key="user_level"
+        )
+        
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+        
+        if st.session_state.last_score_detail:
+            with st.expander("📊 评分详情", expanded=True):
+                detail = st.session_state.last_score_detail
+                col1, col2 = st.columns([1, 3])
+                with col1:
+                    st.metric("总分", f"{detail['total_score']}分")
+                with col2:
+                    st.markdown(f"**💡 评价**：{detail['feedback']}")
+                
+                cols = st.columns(5)
+                for i, (dim, score) in enumerate(detail['dimensions'].items()):
+                    cols[i].metric(dim, f"{score}分")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown("### ✅ 优点")
+                    for s in detail.get('strengths', []):
+                        st.write(f"- {s}")
+                with col2:
+                    st.markdown("### 🔧 改进建议")
+                    for s in detail.get('suggestions', []):
+                        st.write(f"- {s}")
+        
+        if st.session_state.messages:
+            if st.button("🗑️ 清空聊天记录", type="secondary"):
+                st.session_state.messages = []
+                st.session_state.last_score_detail = None
+                st.rerun()
+        
+        SCORE_KEYWORDS = ["打分", "评分", "评价", "判分", "评点", "给分", "估分"]
+        
+        if user_input := st.chat_input("请输入你的问题/感悟...（要求打分请含打分/评分等关键词）"):
+            st.session_state.messages.append({"role": "user", "content": user_input})
+            with st.chat_message("user"):
+                st.markdown(user_input)
+            
+            need_score = any(keyword in user_input for keyword in SCORE_KEYWORDS)
+            
+            with st.spinner(f"{poem_data['author']} 正在构思回复..."):
+                base_instruction = f"""
+请以{poem_data['author']}的角色，结合《{poem_data['title']}》的创作背景回复用户。
 用户学习风格：【{st.session_state.user_profile.get('learning_style', '常规讲解')}】
 用户学习目的：【{st.session_state.user_profile.get('learning_purpose', '兴趣学习')}】
 用户水平：【{user_level}】
-请根据用户的学习目的调整回复重点：
-- 兴趣学习：注重趣味性和故事性
-- 考试备考：注重考点和答题技巧
-- 文化传承：注重文化内涵和历史背景
-- 写作提升：注重修辞手法和创作技巧
-- 专业研究：注重学术深度和文献参考
 
 用户问题：{user_input}
-无需额外输出无关内容，回复贴合诗人身份和情景设定。
-            """.strip()
+                """.strip()
+                
+                if need_score:
+                    score_detail = evaluate_poem_answer(selected_poem_id, user_input)
+                    st.session_state.last_score_detail = score_detail
+                    score = score_detail['total_score']
+                    ai_reply = f"{score_detail['feedback']}\n\n参考要点：{score_detail.get('reference_answer', '')}"
+                else:
+                    agent_input = base_instruction
+                    agent_result = agent_executor.invoke({
+                        "input": agent_input,
+                        "chat_history": []
+                    })
+                    ai_reply = agent_result["output"]
+                    score = 0
+                
+                save_record(
+                    st.session_state.username, 
+                    poem_data['title'],
+                    user_input, 
+                    ai_reply, 
+                    score if need_score and score > 0 else None
+                )
             
-            if need_score:
-                score_detail = evaluate_poem_answer(selected_poem, user_input)
-                st.session_state.last_score_detail = score_detail
-                score = score_detail['total_score']
-                ai_reply = f"{score_detail['feedback']}\n\n参考要点：{score_detail.get('reference_answer', '')}"
+            if need_score and score > 0:
+                full_reply = f"{ai_reply} \n\n **📝 智能国学评分**：{score}分"
+                st.session_state.messages.append({"role": "assistant", "content": full_reply})
+                with st.chat_message("assistant"):
+                    st.markdown(full_reply)
+                    if score < 60:
+                        st.warning("💪 继续加油！")
+                    elif score >= 90:
+                        st.balloons()
+                        st.success("🎉 太棒了！")
             else:
-                agent_input = base_instruction
-                agent_result = agent_executor.invoke({
-                    "input": agent_input,
-                    "chat_history": []
-                })
-                ai_reply = agent_result["output"]
-                score = 0
-            
-            save_record(
-                st.session_state.username, 
-                selected_poem, 
-                user_input, 
-                ai_reply, 
-                score if need_score and score > 0 else None
-            )
+                st.session_state.messages.append({"role": "assistant", "content": ai_reply})
+                with st.chat_message("assistant"):
+                    st.markdown(ai_reply)
+    else:
+        st.warning("未找到匹配的诗词，请尝试其他关键词或作者")
         
-        if need_score and score > 0:
-            full_reply = f"{ai_reply} \n\n **📝 智能国学评分**：{score}分"
-            st.session_state.messages.append({"role": "assistant", "content": full_reply})
-            with st.chat_message("assistant"):
-                st.markdown(full_reply)
-                if score < 60:
-                    st.warning("💪 继续加油！尝试结合创作背景体会诗人心境～")
-                elif score >= 90:
-                    st.balloons()
-                    st.success("🎉 太棒了！对诗词的理解非常到位～")
-        else:
-            st.session_state.messages.append({"role": "assistant", "content": ai_reply})
-            with st.chat_message("assistant"):
-                st.markdown(ai_reply)
+        # 显示热门搜索建议
+        st.markdown("### 💡 热门搜索建议")
+        suggestions = ["明月", "春风", "江南", "落花", "相思", "明月几时有", "大江东去"]
+        cols = st.columns(4)
+        for i, suggestion in enumerate(suggestions):
+            with cols[i % 4]:
+                if st.button(f"🔍 {suggestion}", key=f"suggest_{suggestion}"):
+                    st.session_state.search_keyword = suggestion
+                    st.rerun()

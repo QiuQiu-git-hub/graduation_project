@@ -1,20 +1,8 @@
-streamlit>=1.28.0
-sqlalchemy>=2.0.0
-pandas>=2.0.0
-python-dotenv>=1.0.0
-openai>=1.0.0
-
-# LangChain 核心
-langchain==0.1.17
-langchain-core==0.1.52
-langchain-openai==0.0.8
-langchain-text-splitters==0.0.2
-
-# 关键：固定 pydantic 和 pydantic-settings 的兼容版本
-pydantic==2.5.3
-pydantic-core==2.14.6
-pydantic-settings==2.1.0
-
-# 其他依赖
-typing-extensions>=4.8.0
-annotated-types>=0.6.0
+streamlit
+openai
+python-dotenv
+pandas
+sqlalchemy
+langchain==0.1.0
+langchain-openai==0.0.5
+pydantic==1.10.13

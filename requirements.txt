@@ -5,4 +5,4 @@ pandas
 sqlalchemy
 langchain==0.1.0
 langchain-openai==0.0.5
-tiktoken==0.4.0
+tiktoken==0.5.2

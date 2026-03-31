@@ -1,0 +1,4 @@
+rustc
+cargo
+gcc
+python3-dev

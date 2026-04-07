@@ -4,7 +4,7 @@ import json
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import Tool
-from langchain.agents import AgentExecutor, create_tool_calling_agent
+from langchain.agents import AgentExecutor,create_openai_functions_agent
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 # -------------------------- 1. 基础配置 --------------------------
@@ -342,7 +342,7 @@ prompt = ChatPromptTemplate.from_messages([
 ])
 
 # -------------------------- 10. 智能体执行器 --------------------------
-agent = create_tool_calling_agent(
+agent = create_openai_functions_agent(
     llm=llm,
     tools=tools,
     prompt=prompt

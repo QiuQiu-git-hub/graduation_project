@@ -1,10 +1,11 @@
+# knowledge_base.py
 import os
 import json
-from dotenv import load_dotenv  # type: ignore
-from langchain_openai import ChatOpenAI  # type: ignore
-from langchain_core.tools import Tool  # type: ignore
-from langchain.agents import AgentExecutor, create_openai_functions_agent  # type: ignore
-from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder  # type: ignore
+from dotenv import load_dotenv
+from langchain_openai import ChatOpenAI
+from langchain_core.tools import Tool
+from langchain.agents import AgentExecutor, create_openai_functions_agent
+from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 # -------------------------- 1. 基础配置 --------------------------
 load_dotenv()
@@ -39,7 +40,9 @@ def load_poetry_db():
                 "title": title,
                 "author": author,
                 "content": poem.get("content", ""),
-                "complete_lines": poem.get("complete_lines", [])
+                "complete_lines": poem.get("complete_lines", []),
+                "dynasty": poem.get("dynasty", ""),
+                "theme": poem.get("theme", "")
             }
         return poetry_db
     except Exception as e:
@@ -48,28 +51,16 @@ def load_poetry_db():
 
 POETRY_DB = load_poetry_db()
 
-# -------------------------- 4. 内容检索功能（✅ 新增） --------------------------
-
+# -------------------------- 4. 内容检索功能 --------------------------
 def search_poems_by_content(keyword: str, author: str = "全部") -> dict:
-    """
-    根据诗词内容/标题搜索诗词
-    
-    Args:
-        keyword: 搜索关键词（可在标题、作者、内容中匹配）
-        author: 作者筛选
-    
-    Returns:
-        匹配的诗词字典 {显示名称：诗词 ID}
-    """
+    """根据诗词内容/标题搜索诗词"""
     results = {}
     keyword = keyword.strip()
     
     for poem_id, data in POETRY_DB.items():
-        # 作者筛选
         if author != "全部" and data['author'] != author:
             continue
         
-        # 关键词匹配（标题、作者、内容）
         if keyword:
             match = (
                 keyword in data['title'] or 
@@ -79,29 +70,10 @@ def search_poems_by_content(keyword: str, author: str = "全部") -> dict:
             if not match:
                 continue
         
-        # 生成显示名称（标题 - 作者）
         display_name = f"{data['title']} - {data['author']}"
         results[display_name] = poem_id
     
     return results
-
-def get_poem_display_name(poem_id: str) -> str:
-    """获取诗词显示名称"""
-    poem = get_poem_by_id(poem_id)
-    if not poem:
-        return ""
-    return f"{poem['title']} - {poem['author']}"
-
-def get_poem_selection_options(author: str = "全部") -> dict:
-    """获取下拉框选项"""
-    results = {}
-    for poem_id, data in POETRY_DB.items():
-        if author == "全部" or data['author'] == author:
-            display_name = f"{data['title']} - {data['author']}"
-            results[display_name] = poem_id
-    return results
-
-# -------------------------- 5. 基础辅助函数 --------------------------
 
 def get_poem_by_id(poem_id: str):
     """根据唯一 ID 获取诗词数据"""
@@ -111,29 +83,135 @@ def get_all_authors():
     """获取所有作者列表"""
     return sorted(set(data['author'] for data in POETRY_DB.values()))
 
-def get_poems_by_author(author: str):
-    """根据作者筛选诗词"""
-    if author == "全部":
-        return POETRY_DB
-    return {id: data for id, data in POETRY_DB.items() if data['author'] == author}
+# -------------------------- 5. 智能问答功能 --------------------------
 
-# -------------------------- 6. 工具函数 --------------------------
-
-def retrieve_poem(poem_id: str) -> str:
-    """检索诗词详细信息"""
+def generate_single_poem_question(poem_id: str, asked_questions: list = None) -> dict:
+    """
+    生成单道关于诗词的智能问答题目，并避免与已问问题重复
+    :param poem_id: 诗词ID
+    :param asked_questions: 已经问过的问题文本列表 (用于去重)
+    :return: 单个问题字典 {"question": "...", "category": "...", "difficulty": "..."}
+    """
     poem = get_poem_by_id(poem_id)
     if not poem:
-        available = ", ".join(list(POETRY_DB.keys())[:10])
-        return f"系统暂未收录这首诗词，可尝试：{available}..."
-    return f"""
-【诗词档案】
-标题：《{poem['title']}》
+        return {"question": "系统错误：诗词不存在", "category": "未知", "difficulty": "未知"}
+    
+    # 构建已问问题的提示文本
+    history_prompt = ""
+    if asked_questions and len(asked_questions) > 0:
+        # 只传最近5个作为参考，节省token，同时足以让LLM理解语境
+        recent_questions = asked_questions[-5:]
+        history_list = "\n".join([f"- {q}" for q in recent_questions])
+        history_prompt = f"""
+【重要约束 - 防重复】
+以下问题是之前已经问过的，请**绝对不要**再生成类似、相同或角度过于接近的问题：
+{history_list}
+请尝试从其他未被涉及的角度（如不同的修辞、不同的意象、不同的背景细节、字词赏析等）进行出题。
+"""
+    else:
+        history_prompt = "【重要约束】这是第一道题，请选择一个最核心、最经典的切入点进行提问。"
+
+    prompt = f"""
+【出题任务】
+你是一位国学教授，正在针对特定诗词出考题。
+诗词：《{poem['title']}》
+作者：{poem['author']}
+朝代：{poem.get('dynasty', '未知')}
+内容：{poem['content']}
+
+{history_prompt}
+
+请基于上述诗词的具体内容、意象、情感或背景，生成 1 道**独特且具体**的问题。
+避免生成泛泛而谈的问题（如“这首诗好在哪里？”），问题必须指向诗词中的具体诗句、特定意象或具体历史背景。
+
+按以下 JSON 格式返回（仅返回 JSON 对象，无其他文字，无 Markdown 标记）：
+{{
+    "question": "问题内容",
+    "category": "背景/意境/修辞/情感/名句/字词/特色",
+    "difficulty": "简单/中等/困难"
+}}
+    """
+    
+    try:
+        response = llm.invoke(prompt)
+        # 清理可能的 markdown 代码块标记
+        content = response.content.strip()
+        if content.startswith("```json"):
+            content = content[7:]
+        if content.endswith("```"):
+            content = content[:-3]
+            
+        result = json.loads(content)
+        return result
+    except Exception as e:
+        print(f"生成单题失败: {e}")
+        # 降级返回默认问题
+        return {
+            "question": "请结合全诗，谈谈你对这首诗整体意境的理解？", 
+            "category": "意境", 
+            "difficulty": "中等"
+        }
+
+def evaluate_poem_answer(poem_id: str, user_input: str) -> dict:
+    """多维度评分"""
+    poem = get_poem_by_id(poem_id)
+    if not poem:
+        return {
+            "dimensions": {"内容理解": 0, "背景关联": 0, "艺术鉴赏": 0, "情感体会": 0, "表达质量": 0},
+            "total_score": 0,
+            "feedback": "诗词不存在",
+            "strengths": [],
+            "suggestions": [],
+            "reference_answer": ""
+        }
+    
+    prompt = f"""
+【评分任务】
+诗词：《{poem['title']}》
 作者：{poem['author']}
 内容：{poem['content']}
-    """.strip()
 
-def chat_with_poet(poem_id: str, user_input: str, user_style: str = "常规讲解", 
-                   user_level: str = "中级") -> str:
+用户发言："{user_input}"
+
+请作为国学专家，从以下维度评分（每项 0-20 分）：
+1. 内容理解：对诗词内容和主题的把握
+2. 背景关联：能否联系创作背景分析
+3. 艺术鉴赏：对修辞手法、意象的理解
+4. 情感体会：对诗人情感的共鸣程度
+5. 表达质量：语言组织和逻辑性
+
+请按以下 JSON 格式返回（仅返回 JSON，无其他文字）：
+{{
+    "dimensions": {{
+        "内容理解": 分数,
+        "背景关联": 分数,
+        "艺术鉴赏": 分数,
+        "情感体会": 分数,
+        "表达质量": 分数
+    }},
+    "total_score": 总分,
+    "feedback": "总体评价（50-100 字）",
+    "strengths": ["优点 1", "优点 2"],
+    "suggestions": ["改进建议 1", "改进建议 2"],
+    "reference_answer": "参考回答要点（100 字左右）"
+}}
+    """
+    
+    try:
+        response = llm.invoke(prompt)
+        result = json.loads(response.content.strip())
+        return result
+    except Exception as e:
+        return {
+            "dimensions": {"内容理解": 16, "背景关联": 16, "艺术鉴赏": 16, "情感体会": 16, "表达质量": 16},
+            "total_score": 80,
+            "feedback": "理解基本到位，可进一步深入分析。",
+            "strengths": ["能够理解诗词大意"],
+            "suggestions": ["结合创作背景深入分析", "关注修辞手法的运用"],
+            "reference_answer": "可参考诗词的创作背景和核心意象进行回答。"
+        }
+
+def chat_with_poet(poem_id: str, user_input: str, user_style: str = "常规讲解", user_level: str = "中级") -> str:
     """与诗人角色对话"""
     poem = get_poem_by_id(poem_id)
     if not poem:
@@ -172,185 +250,76 @@ def chat_with_poet(poem_id: str, user_input: str, user_style: str = "常规讲�
     response = llm.invoke(prompt)
     return response.content
 
-def evaluate_poem_answer(poem_id: str, user_input: str) -> dict:
-    """多维度评分"""
-    poem = get_poem_by_id(poem_id)
-    if not poem:
-        return {
-            "dimensions": {"内容理解": 0, "背景关联": 0, "艺术鉴赏": 0, "情感体会": 0, "表达质量": 0},
-            "total_score": 0,
-            "feedback": "诗词不存在",
-            "strengths": [],
-            "suggestions": [],
-            "reference_answer": ""
-        }
-    
-    prompt = f"""
-【评分任务】
-诗词：《{poem['title']}》
-作者：{poem['author']}
-内容：{poem['content']}
+# -------------------------- 6. 学习报告生成 --------------------------
+def generate_report_content(report_data: dict) -> str:
+    """生成学习报告文本内容"""
+    content = f"""
+=====================================
+    🏯 AI 古诗词学习报告
+=====================================
 
-用户发言："{user_input}"
+📋 基本信息
+   用户名：{report_data.get('username', '未知')}
+   当前等级：{report_data.get('level', '小学徒')}
+   总积分：{report_data.get('total_points', 0)}
+   全局排名：第{report_data.get('rank', 0)}名
 
-请作为国学专家，从以下维度评分（每项 0-20 分）：
-1. 内容理解：对诗词内容和主题的把握
-2. 背景关联：能否联系创作背景分析
-3. 艺术鉴赏：对修辞手法、意象的理解
-4. 情感体会：对诗人情感的共鸣程度
-5. 表达质量：语言组织和逻辑性
+📊 学习统计
+   学习记录总数：{report_data.get('total_records', 0)}条
+   平均得分：{report_data.get('avg_score', 0)}分
+   已学诗词：{report_data.get('poems_learned', 0)}首
+   掌握诗词：{report_data.get('mastered_poems', 0)}首
 
-请按以下 JSON 格式返回（仅返回 JSON，无其他文字）：
-{{
-    "dimensions": {{
-        "内容理解": 分数，
-        "背景关联": 分数，
-        "艺术鉴赏": 分数，
-        "情感体会": 分数，
-        "表达质量": 分数
-    }},
-    "total_score": 总分，
-    "feedback": "总体评价（50-100 字）",
-    "strengths": ["优点 1", "优点 2"],
-    "suggestions": ["改进建议 1", "改进建议 2"],
-    "reference_answer": "参考回答要点（100 字左右）"
-}}
+📅 账户信息
+   注册时间：{report_data.get('created_at', '未知')}
+   最近登录：{report_data.get('last_login', '未知')}
+
+=====================================
+    继续努力，更上一层楼！
+=====================================
     """
-    
-    try:
-        response = llm.invoke(prompt)
-        result = json.loads(response.content.strip())
-        return result
-    except Exception as e:
-        return {
-            "dimensions": {"内容理解": 16, "背景关联": 16, "艺术鉴赏": 16, "情感体会": 16, "表达质量": 16},
-            "total_score": 80,
-            "feedback": "理解基本到位，可进一步深入分析。",
-            "strengths": ["能够理解诗词大意"],
-            "suggestions": ["结合创作背景深入分析", "关注修辞手法的运用"],
-            "reference_answer": "可参考诗词的创作背景和核心意象进行回答。"
-        }
+    return content
 
-def generate_quiz(poem_id: str, difficulty: str = "中等") -> dict:
-    """生成诗词测试题"""
-    poem = get_poem_by_id(poem_id)
-    if not poem:
-        return {"error": "诗词不存在"}
-    
-    prompt = f"""
-【出题任务】
-诗词：《{poem['title']}》
-作者：{poem['author']}
-内容：{poem['content']}
-难度：{difficulty}
+# -------------------------- 7. 快捷问题模板 --------------------------
+QUICK_QUESTIONS = [
+    "这首诗的创作背景是什么？",
+    "请帮我分析这首诗的意境",
+    "这首诗有哪些修辞手法？",
+    "诗人表达了怎样的情感？",
+    "请解释诗中名句的含义",
+    "这首诗的写作特点是什么？"
+]
 
-请生成 3 道测试题，包含：
-1. 一道选择题（考察基础知识）
-2. 一道填空题（考察名句默写）
-3. 一道简答题（考察理解分析）
-
-按以下 JSON 格式返回：
-{{
-    "questions": [
-        {{
-            "type": "choice",
-            "question": "题目内容",
-            "options": ["A. 选项 1", "B. 选项 2", "C. 选项 3", "D. 选项 4"],
-            "answer": "A",
-            "explanation": "答案解析"
-        }},
-        {{
-            "type": "fill",
-            "question": "填空题题干",
-            "answer": "正确答案",
-            "explanation": "答案解析"
-        }},
-        {{
-            "type": "short_answer",
-            "question": "简答题题目",
-            "answer_key": "答题要点",
-            "explanation": "参考答案"
-        }}
-    ]
-}}
-    """
-    
-    try:
-        response = llm.invoke(prompt)
-        result = json.loads(response.content.strip())
-        return result
-    except Exception as e:
-        return {"error": "生成题目失败，请稍后重试"}
-
-def play_poetry_game(game_type: str, poem_id: str = None) -> str:
-    """诗词互动游戏"""
-    poem = get_poem_by_id(poem_id) if poem_id else None
-    
-    if game_type == "接龙":
-        prompt = """
-【诗词接龙游戏】
-规则：我说一句诗，你接下一句（首尾字相同或音同）
-我先开始：床前明月光
-
-请用一句古诗接龙，并说明出处。
-        """
-    elif game_type == "飞花令":
-        keyword = "月"
-        first_line = poem['content'].split('。')[0] if poem else "明月几时有"
-        prompt = f"""
-【飞花令游戏】
-关键字：{keyword}
-规则：轮流说出含此字的诗句
-
-我先开始：{first_line}
-
-请你说一句含"{keyword}"字的诗句，并说明出处。
-        """
-    elif game_type == "猜诗人":
-        prompt = """
-【猜诗人游戏】
-我会描述一位诗人的特点和代表作，你来猜是谁。
-
-提示：他是唐代诗人，被称为"诗仙"，嗜酒如命，代表作有《静夜思》《将进酒》等。
-
-请猜出这位诗人是谁，并说出你还知道他的哪些作品。
-        """
-    else:
-        return "暂不支持该游戏类型，可选择：接龙、飞花令、猜诗人"
-    
-    response = llm.invoke(prompt)
-    return response.content
-
-# -------------------------- 7. 工具封装 --------------------------
+# -------------------------- 8. 工具封装 --------------------------
 tools = [
     Tool(
         name="RetrievePoem",
-        func=retrieve_poem,
-        description="检索古诗词的详细信息（作者、内容），输入参数是诗词 ID"
+        func=lambda poem_id: f"""
+【诗词档案】
+标题：《{get_poem_by_id(poem_id)['title'] if get_poem_by_id(poem_id) else '未知'}》
+作者：{get_poem_by_id(poem_id)['author'] if get_poem_by_id(poem_id) else '未知'}
+内容：{get_poem_by_id(poem_id)['content'] if get_poem_by_id(poem_id) else '未知'}
+        """,
+        description="检索古诗词的详细信息"
     ),
     Tool(
         name="ChatWithPoet",
         func=lambda args: chat_with_poet(args[0], args[1], args[2] if len(args) > 2 else "常规讲解"),
-        description="以诗词作者的角色与用户对话、解释诗句、点评用户理解，输入参数：诗词 ID、用户输入、学习风格（可选）"
+        description="以诗词作者的角色与用户对话"
     ),
     Tool(
         name="EvaluatePoemAnswer",
         func=lambda args: json.dumps(evaluate_poem_answer(args[0], args[1]), ensure_ascii=False),
-        description="对用户关于诗词的回答进行多维度评分，返回 JSON 格式的详细评价，输入参数：诗词 ID、用户回答"
+        description="对用户关于诗词的回答进行多维度评分"
     ),
     Tool(
-        name="GenerateQuiz",
-        func=lambda args: json.dumps(generate_quiz(args[0], args[1] if len(args) > 1 else "中等"), ensure_ascii=False),
-        description="生成诗词测试题（选择、填空、简答），输入参数：诗词 ID、难度（简单/中等/困难）"
-    ),
-    Tool(
-        name="PlayPoetryGame",
-        func=play_poetry_game,
-        description="进行诗词互动游戏（接龙/飞花令/猜诗人），输入参数：游戏类型、诗词 ID（飞花令需要）"
+        name="GenerateQuestions",
+        func=lambda poem_id: json.dumps(generate_single_poem_question(poem_id), ensure_ascii=False),
+        description="生成关于诗词的智能问答题目"
     )
 ]
 
-# -------------------------- 8. 智能体提示词 --------------------------
+# -------------------------- 9. 智能体提示词 --------------------------
 prompt = ChatPromptTemplate.from_messages([
     ("system", """
 你是一个专业的古诗词智能导师，同时能扮演历代著名诗人与用户对话。
@@ -359,7 +328,7 @@ prompt = ChatPromptTemplate.from_messages([
 1. 角色扮演：完全代入诗人身份，使用符合时代和人物性格的语言
 2. 个性化教学：根据用户水平和学习目的调整回复策略
 3. 多轮对话：保持上下文连贯，记住之前的对话内容
-4. 互动游戏：能进行诗词接龙、飞花令等互动
+4. 互动问答：能生成问题并评分
 
 【回复规范】
 1. 调用工具后整合结果自然回复，不暴露工具调用细节
@@ -372,14 +341,13 @@ prompt = ChatPromptTemplate.from_messages([
     MessagesPlaceholder(variable_name="agent_scratchpad")
 ])
 
-# -------------------------- 9. 智能体执行器 --------------------------
+# -------------------------- 10. 智能体执行器 --------------------------
 agent = create_openai_functions_agent(
     llm=llm,
     tools=tools,
     prompt=prompt
 )
 
-# 修正 AgentExecutor 初始化参数（新版无需自定义 agent_scratchpad）
 agent_executor = AgentExecutor(
     agent=agent,
     tools=tools,

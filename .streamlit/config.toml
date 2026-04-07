@@ -1,0 +1,11 @@
+[client]
+# 设置工具栏模式为最小化，隐藏大部分菜单项
+toolbarMode = "minimal"
+
+[theme]
+# 可选：自定义主题颜色，使其更符合古诗词风格
+primaryColor = "#8B4513"  #  saddlebrown (深棕色，更有古风感)
+backgroundColor = "#FAF9F6" # offwhite (米白色，护眼且像宣纸)
+secondaryBackgroundColor = "#F0F2F6"
+textColor = "#262730"
+font = "sans serif"
